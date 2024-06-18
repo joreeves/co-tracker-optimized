@@ -59,18 +59,25 @@ def get_points_on_a_grid(
     Returns:
         Tensor: grid.
     """
-    if size == 1:
+    # Updated grid function
+    if isinstance(size, int):
+        size = (size, size)
+
+    if size[0] == 1:
         return torch.tensor([extent[1] / 2, extent[0] / 2], device=device)[None, None]
 
     if center is None:
         center = [extent[0] / 2, extent[1] / 2]
 
-    margin = extent[1] / 64
-    range_y = (margin - extent[0] / 2 + center[0], extent[0] / 2 + center[0] - margin)
-    range_x = (margin - extent[1] / 2 + center[1], extent[1] / 2 + center[1] - margin)
+    # if margin != 0:
+    #     margin = extent[1] / margin
+    margin = [(extent[0] / size[0]) / 2, (extent[1] / size[1]) / 2]
+
+    range_y = (margin[0] - extent[0] / 2 + center[0], extent[0] / 2 + center[0] - margin[0])
+    range_x = (margin[1] - extent[1] / 2 + center[1], extent[1] / 2 + center[1] - margin[1])
     grid_y, grid_x = torch.meshgrid(
-        torch.linspace(*range_y, size, device=device),
-        torch.linspace(*range_x, size, device=device),
+        torch.linspace(*range_y, size[0], device=device),
+        torch.linspace(*range_x, size[1], device=device),
         indexing="ij",
     )
     return torch.stack([grid_x, grid_y], dim=-1).reshape(1, -1, 2)

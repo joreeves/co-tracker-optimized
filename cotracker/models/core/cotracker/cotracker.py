@@ -133,9 +133,12 @@ class CoTracker2(nn.Module):
             # Sample correlation features around each point
             fcorrs = corr_block.sample(coords)  # (B N) S LRR
 
+            fcorrs = fcorrs.type(track_feat.dtype)  # match dtype: added this line
+
             # Get the flow embeddings
             flows = (coords - coords[:, 0:1]).permute(0, 2, 1, 3).reshape(B * N, S, 2)
             flow_emb = get_2d_embedding(flows, 64, cat_coords=True)  # N S E
+            flow_emb = flow_emb.type(track_feat.dtype)  # match dtype: added this line
 
             track_feat_ = track_feat.permute(0, 2, 1, 3).reshape(B * N, S, self.latent_dim)
 
@@ -223,7 +226,7 @@ class CoTracker2(nn.Module):
             assert self.online_ind is not None, "Call model.init_video_online_processing() first."
             assert not is_train, "Training not supported in online mode."
         step = S // 2  # How much the sliding window moves at every step
-        video = 2 * (video / 255.0) - 1.0
+        video = 2 * video - 1.0  # Removed / 255.0
 
         # The first channel is the frame number
         # The rest are the coordinates of points we want to track
@@ -233,8 +236,8 @@ class CoTracker2(nn.Module):
         queried_coords = queried_coords / self.stride
 
         # We store our predictions here
-        coords_predicted = torch.zeros((B, T, N, 2), device=device)
-        vis_predicted = torch.zeros((B, T, N), device=device)
+        coords_predicted = torch.zeros((B, T, N, 2), device=device, dtype=video.dtype)  # match dtype
+        vis_predicted = torch.zeros((B, T, N), device=device, dtype=video.dtype)  # match dtype
         if is_online:
             if self.online_coords_predicted is None:
                 # Init online predictions with zeros
@@ -284,8 +287,8 @@ class CoTracker2(nn.Module):
         # We process only the current video chunk in the online mode
         indices = [self.online_ind] if is_online else range(0, step * num_windows, step)
 
-        coords_init = queried_coords.reshape(B, 1, N, 2).expand(B, S, N, 2).float()
-        vis_init = torch.ones((B, S, N, 1), device=device).float() * 10
+        coords_init = queried_coords.reshape(B, 1, N, 2).expand(B, S, N, 2).type(fmaps.dtype)  # match dtype
+        vis_init = torch.ones((B, S, N, 1), device=device).type(fmaps.dtype) * 10  # match dtype
         for ind in indices:
             # We copy over coords and vis for tracks that are queried
             # by the end of the previous window, which is ind + overlap

@@ -18,12 +18,14 @@ from cotracker.models.build_cotracker import build_cotracker
 
 
 class CoTrackerPredictor(torch.nn.Module):
-    def __init__(self, checkpoint="./checkpoints/cotracker2.pth", batches:int=4):
+    def __init__(self, checkpoint="./checkpoints/cotracker2.pth", batches:int=4, visibility_threshold=0.9):
         """
         Increase the batch size for larger queries. The default batch size is 4.
         """
         super().__init__()
+        self.iters = 6
         self.support_grid_size = 6
+        self.visibility_threshold = visibility_threshold
         self.batches = batches
         model = build_cotracker(checkpoint)
         self.interp_shape = model.model_resolution
@@ -46,6 +48,7 @@ class CoTrackerPredictor(torch.nn.Module):
         grid_size: int = 0,
         grid_query_frame: int = 0,  # only for dense and regular grid tracks
         backward_tracking: bool = False,
+        add_support_grid: bool = False,
     ):
         if queries is None and grid_size == 0:
             tracks, visibilities = self._compute_dense_tracks(
@@ -59,7 +62,7 @@ class CoTrackerPredictor(torch.nn.Module):
                 queries,
                 segm_mask,
                 grid_size,
-                add_support_grid=(grid_size == 0 or segm_mask is not None),
+                add_support_grid=add_support_grid, #(grid_size == 0 or segm_mask is not None),
                 grid_query_frame=grid_query_frame,
                 backward_tracking=backward_tracking,
             )
@@ -104,7 +107,7 @@ class CoTrackerPredictor(torch.nn.Module):
     def _remove_support_grid(self, tracks, visibilities):
         return tracks[:, :, :-self.support_grid_size**2], visibilities[:, :, :-self.support_grid_size**2]
 
-    def _compute_tracks(self, video, queries, support_grid=True, iters=6):
+    def _compute_tracks(self, video, queries, support_grid=False, iters=6):
         B, P, C = queries.shape
 
         # print(queries.shape)
@@ -129,7 +132,7 @@ class CoTrackerPredictor(torch.nn.Module):
             if support_grid:
                 queries_batch = self._add_support_grid(queries_batch)
 
-            tracks_batch, visibilities_batch, __ = self.model.forward(video=video, queries=queries_batch, iters=iters)
+            tracks_batch, visibilities_batch, __ = self.model.forward(video=video, queries=queries_batch, iters=self.iters)
 
             if support_grid:
                 tracks_batch, visibilities_batch = self._remove_support_grid(tracks_batch, visibilities_batch)
@@ -137,7 +140,7 @@ class CoTrackerPredictor(torch.nn.Module):
             tracks[:, :, i::self.batches] = tracks_batch
             visibilities[:, :, i::self.batches] = visibilities_batch
 
-        # print(tracks.shape)
+            break
 
         return tracks[:, :, :-pad], visibilities[:, :, :-pad]
     
@@ -184,25 +187,25 @@ class CoTrackerPredictor(torch.nn.Module):
                 dim=2,
             ).repeat(B, 1, 1).type(video.dtype)  # Make sure dtype matches
 
-        if add_support_grid:
-            queries = self._add_support_grid(queries, self.support_grid_size, self.interp_shape)
+        # if add_support_grid:
+        #     queries = self._add_support_grid(queries, self.support_grid_size, self.interp_shape)
 
         tracks, visibilities = self._compute_tracks(
-            video=video, queries=queries
+            video=video, queries=queries, support_grid=add_support_grid
             )
 
         if backward_tracking:
             tracks, visibilities = self._compute_backward_tracks(
-                video, queries, tracks, visibilities, grid_size
+                video, queries, tracks, visibilities, add_support_grid
             )
-            if add_support_grid:
-                queries[:, -self.support_grid_size**2 :, 0] = T - 1
+            # if add_support_grid:
+            #     queries[:, -self.support_grid_size**2 :, 0] = T - 1
 
-        if add_support_grid:  # Remove support grid points
-            tracks, visibilities = self._remove_support_grid(tracks, visibilities)
+        # if add_support_grid:  # Remove support grid points
+        #     tracks, visibilities = self._remove_support_grid(tracks, visibilities)
 
         thr = 0.9
-        visibilities = visibilities > thr
+        visibilities = visibilities > self.visibility_threshold
 
         # correct query-point predictions
         # see https://github.com/facebookresearch/co-tracker/issues/28
@@ -223,13 +226,13 @@ class CoTrackerPredictor(torch.nn.Module):
         )
         return tracks, visibilities
 
-    def _compute_backward_tracks(self, video, queries, tracks, visibilities, grid_size):
+    def _compute_backward_tracks(self, video, queries, tracks, visibilities, add_support_grid):
         inv_video = video.flip(1).clone()
         inv_queries = queries.clone()
         inv_queries[:, :, 0] = inv_video.shape[1] - inv_queries[:, :, 0] - 1
 
         inv_tracks, inv_visibilities = self._compute_tracks(
-            video=inv_video, queries=inv_queries,
+            video=inv_video, queries=inv_queries, support_grid=add_support_grid
             )
 
         inv_tracks = inv_tracks.flip(1)
@@ -304,7 +307,7 @@ class CoTrackerOnlinePredictor(torch.nn.Module):
         tracks, visibilities, __ = self.model(
             video=video_chunk,
             queries=self.queries,
-            iters=6,
+            iters=self.iters,
             is_online=True,
         )
         thr = 0.9

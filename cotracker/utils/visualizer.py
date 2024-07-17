@@ -8,7 +8,7 @@ import numpy as np
 import imageio
 import torch
 
-from matplotlib import cm
+from matplotlib import colormaps
 import torch.nn.functional as F
 import torchvision.transforms as transforms
 import matplotlib.pyplot as plt
@@ -71,9 +71,9 @@ class Visualizer:
         self.mode = mode
         self.save_dir = save_dir
         if mode == "rainbow":
-            self.color_map = cm.get_cmap("gist_rainbow")
+            self.color_map = colormaps.get_cmap("gist_rainbow")
         elif mode == "cool":
-            self.color_map = cm.get_cmap(mode)
+            self.color_map = colormaps.get_cmap(mode)
         self.show_first_frame = show_first_frame
         self.grayscale = grayscale
         self.tracks_leave_trace = tracks_leave_trace
